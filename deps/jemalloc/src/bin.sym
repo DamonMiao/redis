@@ -1,0 +1,7 @@
+bin_boot
+bin_infos
+bin_infos_init
+bin_init
+bin_postfork_child
+bin_postfork_parent
+bin_prefork

@@ -242,6 +242,7 @@ if test "x$GCC" = "xyes" ; then
     fi
   fi
   JE_CFLAGS_ADD([-Wall])
+  JE_CFLAGS_ADD([-Wextra])
   JE_CFLAGS_ADD([-Wshorten-64-to-32])
   JE_CFLAGS_ADD([-Wsign-compare])
   JE_CFLAGS_ADD([-Wundef])
@@ -289,6 +290,7 @@ if test "x$enable_cxx" = "x1" ; then
   AX_CXX_COMPILE_STDCXX([14], [noext], [optional])
   if test "x${HAVE_CXX14}" = "x1" ; then
     JE_CXXFLAGS_ADD([-Wall])
+    JE_CXXFLAGS_ADD([-Wextra])
     JE_CXXFLAGS_ADD([-g3])
 
     SAVED_LIBS="${LIBS}"
@@ -535,6 +537,66 @@ AC_DEFUN([AC_PROG_NM], [AC_CHECK_TOOL(NM, nm, :)])
 AC_PROG_NM
 
 AC_PROG_AWK
+
+dnl ============================================================================
+dnl jemalloc version.
+dnl
+
+AC_ARG_WITH([version],
+  [AS_HELP_STRING([--with-version=<major>.<minor>.<bugfix>-<nrev>-g<gid>],
+   [Version string])],
+  [
+    echo "${with_version}" | grep ['^[0-9]\+\.[0-9]\+\.[0-9]\+-[0-9]\+-g[0-9a-f]\+$'] 2>&1 1>/dev/null
+    if test $? -eq 0 ; then
+      echo "$with_version" > "${objroot}VERSION"
+    else
+      echo "${with_version}" | grep ['^VERSION$'] 2>&1 1>/dev/null
+      if test $? -ne 0 ; then
+        AC_MSG_ERROR([${with_version} does not match <major>.<minor>.<bugfix>-<nrev>-g<gid> or VERSION])
+      fi
+    fi
+  ], [
+    dnl Set VERSION if source directory is inside a git repository.
+    if test "x`test ! \"${srcroot}\" && cd \"${srcroot}\"; git rev-parse --is-inside-work-tree 2>/dev/null`" = "xtrue" ; then
+      dnl Pattern globs aren't powerful enough to match both single- and
+      dnl double-digit version numbers, so iterate over patterns to support up
+      dnl to version 99.99.99 without any accidental matches.
+      for pattern in ['[0-9].[0-9].[0-9]' '[0-9].[0-9].[0-9][0-9]' \
+                     '[0-9].[0-9][0-9].[0-9]' '[0-9].[0-9][0-9].[0-9][0-9]' \
+                     '[0-9][0-9].[0-9].[0-9]' '[0-9][0-9].[0-9].[0-9][0-9]' \
+                     '[0-9][0-9].[0-9][0-9].[0-9]' \
+                     '[0-9][0-9].[0-9][0-9].[0-9][0-9]']; do
+        (test ! "${srcroot}" && cd "${srcroot}"; git describe --long --abbrev=40 --match="${pattern}") > "${objroot}VERSION.tmp" 2>/dev/null
+        if test $? -eq 0 ; then
+          mv "${objroot}VERSION.tmp" "${objroot}VERSION"
+          break
+        fi
+      done
+    fi
+    rm -f "${objroot}VERSION.tmp"
+  ])
+
+if test ! -e "${objroot}VERSION" ; then
+  if test ! -e "${srcroot}VERSION" ; then
+    AC_MSG_RESULT(
+      [Missing VERSION file, and unable to generate it; creating bogus VERSION])
+    echo "0.0.0-0-g0000000000000000000000000000000000000000" > "${objroot}VERSION"
+  else
+    cp ${srcroot}VERSION ${objroot}VERSION
+  fi
+fi
+jemalloc_version=`cat "${objroot}VERSION"`
+jemalloc_version_major=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print [$]1}'`
+jemalloc_version_minor=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print [$]2}'`
+jemalloc_version_bugfix=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print [$]3}'`
+jemalloc_version_nrev=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print [$]4}'`
+jemalloc_version_gid=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print [$]5}'`
+AC_SUBST([jemalloc_version])
+AC_SUBST([jemalloc_version_major])
+AC_SUBST([jemalloc_version_minor])
+AC_SUBST([jemalloc_version_bugfix])
+AC_SUBST([jemalloc_version_nrev])
+AC_SUBST([jemalloc_version_gid])
 
 dnl Platform-specific settings.  abi and RPATH can probably be determined
 dnl programmatically, but doing so is error-prone, which makes it generally
@@ -848,7 +910,7 @@ AC_ARG_WITH([export],
 fi]
 )
 
-public_syms="aligned_alloc calloc dallocx free mallctl mallctlbymib mallctlnametomib malloc malloc_conf malloc_message malloc_stats_print malloc_usable_size mallocx nallocx posix_memalign rallocx realloc sallocx sdallocx xallocx"
+public_syms="aligned_alloc calloc dallocx free mallctl mallctlbymib mallctlnametomib malloc malloc_conf malloc_message malloc_stats_print malloc_usable_size mallocx smallocx_${jemalloc_version_gid} nallocx posix_memalign rallocx realloc sallocx sdallocx xallocx"
 dnl Check for additional platform-specific public API functions.
 AC_CHECK_FUNC([memalign],
 	      [AC_DEFINE([JEMALLOC_OVERRIDE_MEMALIGN], [ ])
@@ -966,7 +1028,6 @@ cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/private_symbols.sh"
 cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/private_namespace.sh"
 cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/public_namespace.sh"
 cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/public_unnamespace.sh"
-cfghdrs_in="${cfghdrs_in} include/jemalloc/internal/size_classes.sh"
 cfghdrs_in="${cfghdrs_in} include/jemalloc/jemalloc_rename.sh"
 cfghdrs_in="${cfghdrs_in} include/jemalloc/jemalloc_mangle.sh"
 cfghdrs_in="${cfghdrs_in} include/jemalloc/jemalloc.sh"
@@ -979,7 +1040,6 @@ cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/private_symbols_jet.awk"
 cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/public_symbols.txt"
 cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/public_namespace.h"
 cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/public_unnamespace.h"
-cfghdrs_out="${cfghdrs_out} include/jemalloc/internal/size_classes.h"
 cfghdrs_out="${cfghdrs_out} include/jemalloc/jemalloc_protos_jet.h"
 cfghdrs_out="${cfghdrs_out} include/jemalloc/jemalloc_rename.h"
 cfghdrs_out="${cfghdrs_out} include/jemalloc/jemalloc_mangle.h"
@@ -990,6 +1050,10 @@ cfghdrs_out="${cfghdrs_out} test/include/test/jemalloc_test_defs.h"
 cfghdrs_tup="include/jemalloc/jemalloc_defs.h:include/jemalloc/jemalloc_defs.h.in"
 cfghdrs_tup="${cfghdrs_tup} include/jemalloc/internal/jemalloc_internal_defs.h:include/jemalloc/internal/jemalloc_internal_defs.h.in"
 cfghdrs_tup="${cfghdrs_tup} test/include/test/jemalloc_test_defs.h:test/include/test/jemalloc_test_defs.h.in"
+
+dnl ============================================================================
+dnl jemalloc build options.
+dnl
 
 dnl Do not compile with debugging by default.
 AC_ARG_ENABLE([debug],
@@ -1042,6 +1106,22 @@ if test "x$enable_stats" = "x1" ; then
   AC_DEFINE([JEMALLOC_STATS], [ ])
 fi
 AC_SUBST([enable_stats])
+
+dnl Do not enable smallocx by default.
+AC_ARG_ENABLE([experimental_smallocx],
+  [AS_HELP_STRING([--enable-experimental-smallocx], [Enable experimental smallocx API])],
+[if test "x$enable_experimental_smallocx" = "xno" ; then
+enable_experimental_smallocx="0"
+else
+enable_experimental_smallocx="1"
+fi
+],
+[enable_experimental_smallocx="0"]
+)
+if test "x$enable_experimental_smallocx" = "x1" ; then
+  AC_DEFINE([JEMALLOC_EXPERIMENTAL_SMALLOCX_API])
+fi
+AC_SUBST([enable_experimental_smallocx])
 
 dnl Do not enable profiling by default.
 AC_ARG_ENABLE([prof],
@@ -1277,6 +1357,22 @@ if test "x$enable_log" = "x1" ; then
 fi
 AC_SUBST([enable_log])
 
+dnl Do not use readlinkat by default
+AC_ARG_ENABLE([readlinkat],
+  [AS_HELP_STRING([--enable-readlinkat], [Use readlinkat over readlink])],
+[if test "x$enable_readlinkat" = "xno" ; then
+  enable_readlinkat="0"
+else
+  enable_readlinkat="1"
+fi
+],
+[enable_readlinkat="0"]
+)
+if test "x$enable_readlinkat" = "x1" ; then
+  AC_DEFINE([JEMALLOC_READLINKAT], [ ])
+fi
+AC_SUBST([enable_readlinkat])
+
 
 JE_COMPILABLE([a program using __builtin_unreachable], [
 void foo (void) {
@@ -1429,71 +1525,6 @@ if test "x${LG_PAGE}" != "xundefined" -a \
   AC_MSG_ERROR([Huge page size (2^${je_cv_lg_hugepage}) must be at least page size (2^${LG_PAGE})])
 fi
 AC_DEFINE_UNQUOTED([LG_HUGEPAGE], [${je_cv_lg_hugepage}])
-
-AC_ARG_WITH([lg_page_sizes],
-  [AS_HELP_STRING([--with-lg-page-sizes=<lg-page-sizes>],
-   [Base 2 logs of system page sizes to support])],
-  [LG_PAGE_SIZES="$with_lg_page_sizes"], [LG_PAGE_SIZES="$LG_PAGE"])
-
-dnl ============================================================================
-dnl jemalloc configuration.
-dnl
-
-AC_ARG_WITH([version],
-  [AS_HELP_STRING([--with-version=<major>.<minor>.<bugfix>-<nrev>-g<gid>],
-   [Version string])],
-  [
-    echo "${with_version}" | grep ['^[0-9]\+\.[0-9]\+\.[0-9]\+-[0-9]\+-g[0-9a-f]\+$'] 2>&1 1>/dev/null
-    if test $? -eq 0 ; then
-      echo "$with_version" > "${objroot}VERSION"
-    else
-      echo "${with_version}" | grep ['^VERSION$'] 2>&1 1>/dev/null
-      if test $? -ne 0 ; then
-        AC_MSG_ERROR([${with_version} does not match <major>.<minor>.<bugfix>-<nrev>-g<gid> or VERSION])
-      fi
-    fi
-  ], [
-    dnl Set VERSION if source directory is inside a git repository.
-    if test "x`test ! \"${srcroot}\" && cd \"${srcroot}\"; git rev-parse --is-inside-work-tree 2>/dev/null`" = "xtrue" ; then
-      dnl Pattern globs aren't powerful enough to match both single- and
-      dnl double-digit version numbers, so iterate over patterns to support up
-      dnl to version 99.99.99 without any accidental matches.
-      for pattern in ['[0-9].[0-9].[0-9]' '[0-9].[0-9].[0-9][0-9]' \
-                     '[0-9].[0-9][0-9].[0-9]' '[0-9].[0-9][0-9].[0-9][0-9]' \
-                     '[0-9][0-9].[0-9].[0-9]' '[0-9][0-9].[0-9].[0-9][0-9]' \
-                     '[0-9][0-9].[0-9][0-9].[0-9]' \
-                     '[0-9][0-9].[0-9][0-9].[0-9][0-9]']; do
-        (test ! "${srcroot}" && cd "${srcroot}"; git describe --long --abbrev=40 --match="${pattern}") > "${objroot}VERSION.tmp" 2>/dev/null
-        if test $? -eq 0 ; then
-          mv "${objroot}VERSION.tmp" "${objroot}VERSION"
-          break
-        fi
-      done
-    fi
-    rm -f "${objroot}VERSION.tmp"
-  ])
-
-if test ! -e "${objroot}VERSION" ; then
-  if test ! -e "${srcroot}VERSION" ; then
-    AC_MSG_RESULT(
-      [Missing VERSION file, and unable to generate it; creating bogus VERSION])
-    echo "0.0.0-0-g0000000000000000000000000000000000000000" > "${objroot}VERSION"
-  else
-    cp ${srcroot}VERSION ${objroot}VERSION
-  fi
-fi
-jemalloc_version=`cat "${objroot}VERSION"`
-jemalloc_version_major=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print [$]1}'`
-jemalloc_version_minor=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print [$]2}'`
-jemalloc_version_bugfix=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print [$]3}'`
-jemalloc_version_nrev=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print [$]4}'`
-jemalloc_version_gid=`echo ${jemalloc_version} | tr ".g-" " " | awk '{print [$]5}'`
-AC_SUBST([jemalloc_version])
-AC_SUBST([jemalloc_version_major])
-AC_SUBST([jemalloc_version_minor])
-AC_SUBST([jemalloc_version_bugfix])
-AC_SUBST([jemalloc_version_nrev])
-AC_SUBST([jemalloc_version_gid])
 
 dnl ============================================================================
 dnl Configure pthreads.
@@ -2175,16 +2206,6 @@ AC_CONFIG_COMMANDS([include/jemalloc/internal/public_unnamespace.h], [
   srcdir="${srcdir}"
   objroot="${objroot}"
 ])
-AC_CONFIG_COMMANDS([include/jemalloc/internal/size_classes.h], [
-  mkdir -p "${objroot}include/jemalloc/internal"
-  "${SHELL}" "${srcdir}/include/jemalloc/internal/size_classes.sh" "${LG_QUANTA}" 3 "${LG_PAGE_SIZES}" 2 > "${objroot}include/jemalloc/internal/size_classes.h"
-], [
-  SHELL="${SHELL}"
-  srcdir="${srcdir}"
-  objroot="${objroot}"
-  LG_QUANTA="${LG_QUANTA}"
-  LG_PAGE_SIZES="${LG_PAGE_SIZES}"
-])
 AC_CONFIG_COMMANDS([include/jemalloc/jemalloc_protos_jet.h], [
   mkdir -p "${objroot}include/jemalloc"
   cat "${srcdir}/include/jemalloc/jemalloc_protos.h.in" | sed -e 's/@je_@/jet_/g' > "${objroot}include/jemalloc/jemalloc_protos_jet.h"
@@ -2280,6 +2301,7 @@ AC_MSG_RESULT([malloc_conf        : ${config_malloc_conf}])
 AC_MSG_RESULT([autogen            : ${enable_autogen}])
 AC_MSG_RESULT([debug              : ${enable_debug}])
 AC_MSG_RESULT([stats              : ${enable_stats}])
+AC_MSG_RESULT([experimetal_smallocx : ${enable_experimental_smallocx}])
 AC_MSG_RESULT([prof               : ${enable_prof}])
 AC_MSG_RESULT([prof-libunwind     : ${enable_prof_libunwind}])
 AC_MSG_RESULT([prof-libgcc        : ${enable_prof_libgcc}])

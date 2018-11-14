@@ -4,6 +4,8 @@
 
 #include "jemalloc/internal/assert.h"
 
+JEMALLOC_DIAGNOSTIC_DISABLE_SPURIOUS
+
 /******************************************************************************/
 /* Data. */
 
@@ -21,9 +23,6 @@ size_t n_background_threads;
 size_t max_background_threads;
 /* Thread info per-index. */
 background_thread_info_t *background_thread_info;
-
-/* False if no necessary runtime support. */
-bool can_enable_background_thread;
 
 /******************************************************************************/
 
@@ -81,7 +80,7 @@ background_thread_info_init(tsdn_t *tsdn, background_thread_info_t *info) {
 }
 
 static inline bool
-set_current_thread_affinity(UNUSED int cpu) {
+set_current_thread_affinity(int cpu) {
 #if defined(JEMALLOC_HAVE_SCHED_SETAFFINITY)
 	cpu_set_t cpuset;
 	CPU_ZERO(&cpuset);
@@ -510,6 +509,8 @@ background_thread_entry(void *ind_arg) {
 	assert(thread_ind < max_background_threads);
 #ifdef JEMALLOC_HAVE_PTHREAD_SETNAME_NP
 	pthread_setname_np(pthread_self(), "jemalloc_bg_thd");
+#elif defined(__FreeBSD__)
+	pthread_set_name_np(pthread_self(), "jemalloc_bg_thd");
 #endif
 	if (opt_percpu_arena != percpu_arena_disabled) {
 		set_current_thread_affinity((int)thread_ind);
@@ -812,16 +813,21 @@ pthread_create_fptr_init(void) {
 	if (pthread_create_fptr != NULL) {
 		return false;
 	}
+	/*
+	 * Try the next symbol first, because 1) when use lazy_lock we have a
+	 * wrapper for pthread_create; and 2) application may define its own
+	 * wrapper as well (and can call malloc within the wrapper).
+	 */
 	pthread_create_fptr = dlsym(RTLD_NEXT, "pthread_create");
 	if (pthread_create_fptr == NULL) {
-		can_enable_background_thread = false;
-		if (config_lazy_lock || opt_background_thread) {
+		if (config_lazy_lock) {
 			malloc_write("<jemalloc>: Error in dlsym(RTLD_NEXT, "
 			    "\"pthread_create\")\n");
 			abort();
+		} else {
+			/* Fall back to the default symbol. */
+			pthread_create_fptr = pthread_create;
 		}
-	} else {
-		can_enable_background_thread = true;
 	}
 
 	return false;
