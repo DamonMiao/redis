@@ -63,7 +63,7 @@
 
 /* Test for backtrace() */
 #if defined(__APPLE__) || (defined(__linux__) && defined(__GLIBC__))
-#define HAVE_BACKTRACE 1
+//#define HAVE_BACKTRACE 0
 #endif
 
 /* MSG_NOSIGNAL. */
